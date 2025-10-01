@@ -6,7 +6,7 @@ import ControlPanel from './ControlPanel';
 import ChatPanel from './ChatPanel';
 import StudentEngagementMonitor from './StudentEngagementMonitor';
 import PerformanceDashboard from './PerformanceDashboard';
-import { regenerateStepContent } from '../services/geminiService';
+import { regenerateStepContent, getAdaptiveSuggestion } from '../services/geminiService';
 import { speak, stopSpeaking } from '../services/speechService';
 import { ThumbsUp } from 'lucide-react';
 
@@ -24,6 +24,7 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
   const [isAdapting, setIsAdapting] = useState(false);
   const [lessonFinished, setLessonFinished] = useState(false);
   const [lessonResult, setLessonResult] = useState<LessonResult | null>(null);
+  const [suggestionMadeForStep, setSuggestionMadeForStep] = useState<number | null>(null);
 
   // New/Restored states for Autoplay and TTS
   const [isAutoplay, setIsAutoplay] = useState(false);
@@ -110,6 +111,42 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
     }
     return () => stopSpeaking();
   }, [currentStepIndex, currentStep, isMuted, hasInteracted]);
+  
+  // Adaptive teaching effect for low engagement
+  useEffect(() => {
+    const handleLowEngagement = async () => {
+        // Only trigger if engagement is low, not currently adapting, and haven't suggested for this step yet
+        if (engagementLevel === EngagementLevel.LOW && !isAdapting && suggestionMadeForStep !== currentStepIndex) {
+            setSuggestionMadeForStep(currentStepIndex); // Mark that a suggestion is being made for this step
+            stopSpeaking();
+            setIsAutoplay(false);
+
+            const suggestionText = await getAdaptiveSuggestion(currentStep.content, engagementLevel);
+            
+            const suggestionMessage: ChatMessage = {
+                sender: 'ai',
+                text: suggestionText,
+                suggestion: {
+                    label: "Yes, let's try another way!",
+                    action: 'regenerate',
+                }
+            };
+            setMessages(prev => [...prev, suggestionMessage]);
+        }
+    };
+
+    // Use a timeout to avoid being too reactive to fleeting engagement changes
+    const timer = setTimeout(handleLowEngagement, 2000);
+
+    return () => clearTimeout(timer);
+
+  }, [engagementLevel, currentStepIndex, isAdapting, suggestionMadeForStep, currentStep.content]);
+
+  // Reset suggestion flag when the step changes
+  useEffect(() => {
+    setSuggestionMadeForStep(null);
+  }, [currentStepIndex]);
+
 
   const handlePrevStep = () => {
     setHasInteracted(true);
@@ -147,6 +184,13 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
     newSteps[currentStepIndex] = { ...currentStep, content: newContent };
     setCurrentLessonPlan({ ...currentLessonPlan, steps: newSteps });
     setIsAdapting(false);
+  };
+
+  const handleSuggestionAction = (action: 'regenerate') => {
+    if (action === 'regenerate') {
+        setMessages(prev => [...prev, { sender: 'ai', text: "Great! Let's rephrase this..." }]);
+        handleRegenerate();
+    }
   };
 
   const handleEndLesson = useCallback(() => {
@@ -187,6 +231,7 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
             messages={messages} setMessages={setMessages} 
             lessonContext={`${currentLessonPlan.topic} - ${currentStep.title}`}
             onRaiseHand={handleRaiseHand}
+            onSuggestionAction={handleSuggestionAction}
            />
           <StudentEngagementMonitor onEngagementChange={handleEngagementChange} />
         </div>

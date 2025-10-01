@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { ChatMessage } from '../types';
 import { getChatResponse } from '../services/geminiService';
-import { Send, MessageSquare, Loader2, User, Hand, Mic, Paperclip, X } from 'lucide-react';
+import { Send, MessageSquare, Loader2, User, Hand, Mic, Paperclip, X, Sparkles } from 'lucide-react';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   lessonContext: string;
   onRaiseHand: () => void;
+  onSuggestionAction?: (action: 'regenerate') => void;
 }
 
 const formatChatMessage = (text: string) => {
@@ -27,7 +28,7 @@ const fileToBase64 = (file: File): Promise<string> =>
   });
 
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonContext, onRaiseHand }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonContext, onRaiseHand, onSuggestionAction }) => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -179,6 +180,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonCont
                 <img src={msg.imageUrl} alt="User upload" className="mb-2 rounded-lg max-w-full h-auto" />
               )}
               {msg.text && <p className="text-sm" dangerouslySetInnerHTML={formatChatMessage(msg.text)}></p>}
+              {msg.suggestion && onSuggestionAction && (
+                <button
+                    onClick={() => onSuggestionAction(msg.suggestion!.action)}
+                    className="mt-2 w-full text-left px-3 py-1.5 text-sm font-semibold rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-900 transition-colors flex items-center space-x-2"
+                >
+                    <Sparkles size={16} />
+                    <span>{msg.suggestion.label}</span>
+                </button>
+              )}
             </div>
              {msg.sender === 'user' && (
               <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 flex items-center justify-center">

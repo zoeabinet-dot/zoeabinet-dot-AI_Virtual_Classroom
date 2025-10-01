@@ -30,6 +30,10 @@ export interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
   imageUrl?: string;
+  suggestion?: {
+    label: string;
+    action: 'regenerate';
+  };
 }
 
 export enum EngagementLevel {

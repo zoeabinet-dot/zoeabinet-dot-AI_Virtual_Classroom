@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { EngagementLevel, BehavioralEvent } from '../types';
-import { BarChart3, TrendingUp, TrendingDown, Minus, Camera, CameraOff, Smile, Frown, Meh, Loader2, AlertTriangle, Cpu } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Minus, Camera, CameraOff, Smile, Frown, Meh, Loader2, AlertTriangle, Cpu, ArrowLeft, ArrowRight, ArrowDown } from 'lucide-react';
 
 declare const faceapi: any;
 
@@ -39,12 +39,18 @@ const eventIcons: { [key: string]: React.ReactElement } = {
     Smile: <Smile size={14} className="text-green-500" />,
     Frown: <Frown size={14} className="text-red-500" />,
     Meh: <Meh size={14} className="text-yellow-500" />,
+    ArrowLeft: <ArrowLeft size={14} className="text-red-500" />,
+    ArrowRight: <ArrowRight size={14} className="text-red-500" />,
+    ArrowDown: <ArrowDown size={14} className="text-red-500" />,
 };
 
 const possibleEvents: Omit<BehavioralEvent, 'timestamp'>[] = [
     { type: 'positive', description: "Positive expression detected", icon: 'Smile' },
     { type: 'neutral', description: "Focused on screen", icon: 'Meh' },
     { type: 'distracted', description: "Looking away from screen", icon: 'Frown' },
+    { type: 'distracted', description: "Looking left", icon: 'ArrowLeft' },
+    { type: 'distracted', description: "Looking right", icon: 'ArrowRight' },
+    { type: 'distracted', description: "Looking down", icon: 'ArrowDown' },
     { type: 'positive', description: "Nodding in agreement", icon: 'Smile'},
 ];
 
@@ -78,6 +84,9 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
             setLoadingMessage('Loading face detector model...');
             await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
             
+            setLoadingMessage('Loading landmark model...');
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+
             setLoadingMessage('Loading expression model...');
             await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
             
@@ -120,20 +129,51 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
     }
   };
 
+  const getHeadPoseEvent = (landmarks: any): BehavioralEvent | null => {
+      const nose = landmarks.getNose()[3]; // Tip of the nose
+      const leftEye = landmarks.getLeftEye()[0];
+      const rightEye = landmarks.getRightEye()[3];
+      const jawLeft = landmarks.getJawOutline()[1];
+      const jawRight = landmarks.getJawOutline()[15];
+      const chin = landmarks.getJawOutline()[8];
+      const leftEyebrow = landmarks.getLeftEyeBrow()[2];
+
+      const horizontalDistLeft = nose.x - jawLeft.x;
+      const horizontalDistRight = jawRight.x - nose.x;
+      const horizontalRatio = horizontalDistLeft / horizontalDistRight;
+
+      const verticalDistUpper = nose.y - leftEyebrow.y;
+      const verticalDistLower = chin.y - nose.y;
+      const verticalRatio = verticalDistUpper / verticalDistLower;
+
+      if (horizontalRatio > 1.8) return { type: 'distracted', description: 'Looking right', icon: 'ArrowRight', timestamp: Date.now() };
+      if (horizontalRatio < 0.55) return { type: 'distracted', description: 'Looking left', icon: 'ArrowLeft', timestamp: Date.now() };
+      if (verticalRatio < 0.8) return { type: 'distracted', description: 'Looking down', icon: 'ArrowDown', timestamp: Date.now() };
+
+      return null;
+  };
+
   const runRealtimeDetection = useCallback(async () => {
     const video = videoRef.current;
     if (!video || video.readyState < 3 || monitorMode !== 'realtime') return;
 
-    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 })).withFaceExpressions();
+    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 })).withFaceLandmarks().withFaceExpressions();
    
     if (detections && detections.length > 0) {
-        const expressions = detections[0].expressions;
-        const dominantExpression = Object.keys(expressions).reduce((a, b) => expressions[a] > expressions[b] ? a : b);
-        let newEvent: BehavioralEvent;
-        switch (dominantExpression) {
-            case 'happy': newEvent = { type: 'positive', description: 'Positive expression detected', icon: 'Smile', timestamp: Date.now() }; break;
-            case 'neutral': newEvent = { type: 'neutral', description: 'Neutral expression detected', icon: 'Meh', timestamp: Date.now() }; break;
-            default: newEvent = { type: 'distracted', description: `${dominantExpression.charAt(0).toUpperCase() + dominantExpression.slice(1)} expression`, icon: 'Frown', timestamp: Date.now() };
+        const { landmarks, expressions } = detections[0];
+        let newEvent: BehavioralEvent | null = null;
+        
+        // Prioritize head pose as a stronger indicator of distraction
+        newEvent = getHeadPoseEvent(landmarks);
+
+        // If head pose is neutral, fall back to expressions
+        if (!newEvent) {
+            const dominantExpression = Object.keys(expressions).reduce((a, b) => expressions[a] > expressions[b] ? a : b);
+            switch (dominantExpression) {
+                case 'happy': newEvent = { type: 'positive', description: 'Positive expression detected', icon: 'Smile', timestamp: Date.now() }; break;
+                case 'neutral': newEvent = { type: 'neutral', description: 'Neutral expression detected', icon: 'Meh', timestamp: Date.now() }; break;
+                default: newEvent = { type: 'distracted', description: `${dominantExpression.charAt(0).toUpperCase() + dominantExpression.slice(1)} expression`, icon: 'Frown', timestamp: Date.now() };
+            }
         }
         setEventLog(prevLog => [newEvent, ...prevLog.slice(0, 4)]);
     } else {
@@ -151,9 +191,7 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
   }, []);
 
   const drawHud = useCallback(() => {
-    let t = 0;
     const animate = async () => {
-        t++;
         const canvas = canvasRef.current;
         const video = videoRef.current;
         if (!canvas || !video || video.readyState < 3) {
@@ -172,42 +210,17 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
 
         ctx.clearRect(0, 0, w, h);
         
-        let box;
-        let confidence = "98.7%";
-
         if (monitorMode === 'realtime') {
-            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }));
+            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 })).withFaceLandmarks();
              if (detections && detections.length > 0) {
                 const displaySize = { width: w, height: h };
                 const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                box = resizedDetections[0].box;
-                confidence = `${(resizedDetections[0].score * 100).toFixed(1)}%`;
+                faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
              }
         } else if (monitorMode === 'simulated') {
-            const boxSize = Math.min(w, h) * 0.6;
-            const x = (w - boxSize) / 2 + Math.sin(t * 0.03) * (w - boxSize) / 3;
-            const y = (h - boxSize) / 2 + Math.cos(t * 0.05) * (h - boxSize) / 3;
-            box = { x, y, width: boxSize, height: boxSize };
+            // Simulation drawing logic could go here if desired
         }
         
-        if (box) {
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(box.x, box.y, box.width, box.height);
-
-            const lineLen = Math.min(box.width, box.height) * 0.2;
-            ctx.beginPath();
-            ctx.moveTo(box.x, box.y + lineLen); ctx.lineTo(box.x, box.y); ctx.lineTo(box.x + lineLen, box.y);
-            ctx.moveTo(box.x + box.width - lineLen, box.y); ctx.lineTo(box.x + box.width, box.y); ctx.lineTo(box.x + box.width, box.y + lineLen);
-            ctx.moveTo(box.x, box.y + box.height - lineLen); ctx.lineTo(box.x, box.y + box.height); ctx.lineTo(box.x + lineLen, box.y + box.height);
-            ctx.moveTo(box.x + box.width - lineLen, box.y + box.height); ctx.lineTo(box.x + box.width, box.y + box.height); ctx.lineTo(box.x + box.width, box.y + box.height - lineLen);
-            ctx.stroke();
-
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
-            ctx.font = '12px "Inter", sans-serif';
-            ctx.fillText(`CONF: ${confidence}`, box.x, box.y - 5);
-        }
-
         if (isCameraOn) animationFrameRef.current = requestAnimationFrame(animate);
     };
     animate();
@@ -226,7 +239,6 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
         drawHud();
     } else if (monitorMode === 'simulated') {
         runSimulation();
-        drawHud();
     }
 
     return () => {
@@ -256,7 +268,7 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
     if (isCameraOn) return null;
     if (monitorMode === 'loading') return <><Loader2 className="h-10 w-10 mb-2 mx-auto text-gray-400 animate-spin"/><p className="text-sm font-medium text-gray-300">Loading AI Models</p><p className="text-xs text-gray-400 mt-1">{loadingMessage}</p></>;
     if (monitorMode === 'simulated') return <><AlertTriangle className="h-10 w-10 mb-2 mx-auto text-yellow-400"/><p className="text-sm font-medium text-yellow-400">Simulation Mode Active</p><p className="text-xs text-gray-400 mt-1 text-center">Real-time analysis failed. This can be caused by network settings. <strong className="font-bold">Try disabling ad-blockers for this site.</strong></p></>;
-    return <><CameraOff className="h-10 w-10 mb-2 mx-auto text-gray-500"/><p className="text-sm font-medium text-gray-300">Camera is off</p>{cameraError ? <p className="text-xs text-red-400 mt-1 text-center">{cameraError}</p> : <p className="text-xs text-gray-400 mt-1">Enable for real-time expression analysis.</p>}</>;
+    return <><CameraOff className="h-10 w-10 mb-2 mx-auto text-gray-500"/><p className="text-sm font-medium text-gray-300">Camera is off</p>{cameraError ? <p className="text-xs text-red-400 mt-1 text-center">{cameraError}</p> : <p className="text-xs text-gray-400 mt-1">Enable for real-time expression and pose analysis.</p>}</>;
   };
 
   return (
