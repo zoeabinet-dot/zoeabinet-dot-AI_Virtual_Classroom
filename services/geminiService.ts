@@ -1,4 +1,5 @@
-import { GoogleGenAI, Type } from "@google/genai";
+// FIX: Removed erroneous file header that was causing a syntax error.
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import type { LessonPlan, LessonStep } from '../types';
 
 if (!process.env.API_KEY) {
@@ -89,26 +90,84 @@ export const generateImage = async (prompt: string): Promise<string> => {
     }
 };
 
+const whiteboardTools: FunctionDeclaration[] = [
+    {
+        name: 'addText',
+        description: 'Adds a text box to the smart whiteboard.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                text: { type: Type.STRING, description: 'The content of the text box.' },
+                options: { type: Type.OBJECT, description: 'Optional styling like { left: 100, top: 100, color: "#ff0000", fontSize: 24 }' }
+            },
+            required: ['text']
+        }
+    },
+    {
+        name: 'addShape',
+        description: 'Adds a shape (rectangle or circle) to the smart whiteboard.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                shapeType: { type: Type.STRING, enum: ['rect', 'circle'], description: 'The type of shape to add.' },
+                options: { type: Type.OBJECT, description: 'Optional styling like { left: 100, top: 100, fill: "transparent", stroke: "#000" }' }
+            },
+            required: ['shapeType']
+        }
+    },
+    {
+        name: 'addImage',
+        description: 'Generates an image from a text prompt and adds it to the whiteboard.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                prompt: { type: Type.STRING, description: 'A detailed description of the image to generate.' },
+                options: { type: Type.OBJECT, description: 'Optional positioning like { left: 100, top: 100 }' }
+            },
+            required: ['prompt']
+        }
+    },
+    {
+        name: 'clearCanvas',
+        description: 'Clears all content from the smart whiteboard.',
+        parameters: { type: Type.OBJECT, properties: {} }
+    }
+];
+
 export const getChatResponse = async (
     userMessage: string, 
     lessonContext: string,
-    imageData?: { base64: string; mimeType: string }
-): Promise<string> => {
-    const systemInstruction = `You are a friendly and encouraging AI teacher. A student has a question or has shared an image. The current lesson context is "${lessonContext}". Please provide a clear, concise, and helpful answer suitable for the student's grade level. If an image was provided with the question, analyze it and incorporate your analysis into the response. Be supportive and positive.`;
+    chatImageData?: { base64: string; mimeType: string },
+    whiteboardJson?: any,
+    whiteboardImage?: string,
+): Promise<{ text: string; functionCalls?: any[] }> => {
+    const systemInstruction = `You are a friendly, interactive AI teacher. You are conducting a lesson for a student and have a shared smart whiteboard.
+    - The current lesson context is: "${lessonContext}".
+    - The student may ask questions about the lesson, their chat uploads, or the contents of the whiteboard.
+    - The whiteboard's contents are provided as both a JSON object list and a screenshot. Use this context to answer questions.
+    - You have tools to modify the whiteboard. You can use these tools to add text, shapes, generate and add images, or clear the canvas to better explain concepts. Use your tools when it would be helpful to illustrate your point visually.
+    - Be supportive, concise, and helpful.`;
 
     const parts = [];
-    if (imageData) {
-        parts.push({
-            inlineData: {
-                data: imageData.base64,
-                mimeType: imageData.mimeType,
-            },
-        });
-    }
+
+    // Add user's text message if available
     if (userMessage) {
-        parts.push({ text: userMessage });
+        parts.push({ text: `Student's question: "${userMessage}"` });
+    }
+
+    // Add image uploaded via chat
+    if (chatImageData) {
+        parts.push({ text: "The student has also uploaded this image in the chat:" });
+        parts.push({ inlineData: { data: chatImageData.base64, mimeType: chatImageData.mimeType } });
+    }
+
+    // Add whiteboard context
+    if (whiteboardJson && whiteboardJson.length > 0 && whiteboardImage) {
+        parts.push({ text: `Here is the current state of the shared whiteboard. Use this context for your answer.`});
+        parts.push({ text: `Whiteboard objects (JSON): ${JSON.stringify(whiteboardJson)}` });
+        parts.push({ inlineData: { data: whiteboardImage, mimeType: 'image/png' } });
     } else {
-        parts.push({ text: "Please analyze this image in the context of our lesson."});
+        parts.push({ text: "The shared whiteboard is currently empty." });
     }
 
     try {
@@ -117,12 +176,18 @@ export const getChatResponse = async (
             contents: { parts },
             config: {
               systemInstruction: systemInstruction,
+              tools: [{ functionDeclarations: whiteboardTools }],
             }
         });
-        return response.text;
+
+        return {
+            text: response.text,
+            functionCalls: response.functionCalls,
+        };
+
     } catch (error) {
         console.error("Error getting chat response:", error);
-        return "I'm sorry, I'm having a little trouble thinking right now. Could you ask me again in a moment?";
+        return { text: "I'm sorry, I'm having a little trouble thinking right now. Could you ask me again in a moment?" };
     }
 };
 

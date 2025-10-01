@@ -1,3 +1,5 @@
+
+// FIX: Removed erroneous file header that was causing a syntax error.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { LessonPlan, LessonResult, ChatMessage } from '../types';
 import { LessonStepType, EngagementLevel } from '../types';
@@ -6,9 +8,10 @@ import ControlPanel from './ControlPanel';
 import ChatPanel from './ChatPanel';
 import StudentEngagementMonitor from './StudentEngagementMonitor';
 import PerformanceDashboard from './PerformanceDashboard';
-import { regenerateStepContent, getAdaptiveSuggestion } from '../services/geminiService';
+import { regenerateStepContent, getAdaptiveSuggestion, generateImage } from '../services/geminiService';
 import { speak, stopSpeaking } from '../services/speechService';
 import { ThumbsUp } from 'lucide-react';
+import SmartWhiteboard from './SmartWhiteboard';
 
 interface VirtualClassroomProps {
   lessonPlan: LessonPlan;
@@ -26,12 +29,18 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
   const [lessonResult, setLessonResult] = useState<LessonResult | null>(null);
   const [suggestionMadeForStep, setSuggestionMadeForStep] = useState<number | null>(null);
 
-  // New/Restored states for Autoplay and TTS
   const [isAutoplay, setIsAutoplay] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [autoplayProgress, setAutoplayProgress] = useState(0);
-  const [hasInteracted, setHasInteracted] = useState(false); // Fix for speech synthesis error
+  const [hasInteracted, setHasInteracted] = useState(false);
   const autoplayIntervalRef = useRef<number | null>(null);
+  const smartWhiteboardRef = useRef<{ 
+    getCanvasState: () => { json: any; image: string }; 
+    aiAddText: (text: string, options: any) => void;
+    aiAddShape: (shapeType: string, options: any) => void;
+    aiAddImage: (imageUrl: string, options: any) => void;
+    aiClearCanvas: () => void;
+  }>(null);
   
   const currentStep = currentLessonPlan.steps[currentStepIndex];
 
@@ -100,7 +109,7 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
 
   // TTS effect
   useEffect(() => {
-    if (!isMuted && hasInteracted) { // Only speak after user interaction
+    if (!isMuted && hasInteracted) {
       let textToSpeak = currentStep.content;
       if (currentStep.type === LessonStepType.QUIZ && currentStep.quizOptions) {
         textToSpeak += ' Your options are: ' + currentStep.quizOptions.map(o => o.option).join(', ');
@@ -115,9 +124,8 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
   // Adaptive teaching effect for low engagement
   useEffect(() => {
     const handleLowEngagement = async () => {
-        // Only trigger if engagement is low, not currently adapting, and haven't suggested for this step yet
         if (engagementLevel === EngagementLevel.LOW && !isAdapting && suggestionMadeForStep !== currentStepIndex) {
-            setSuggestionMadeForStep(currentStepIndex); // Mark that a suggestion is being made for this step
+            setSuggestionMadeForStep(currentStepIndex);
             stopSpeaking();
             setIsAutoplay(false);
 
@@ -135,18 +143,13 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
         }
     };
 
-    // Use a timeout to avoid being too reactive to fleeting engagement changes
     const timer = setTimeout(handleLowEngagement, 2000);
-
     return () => clearTimeout(timer);
-
   }, [engagementLevel, currentStepIndex, isAdapting, suggestionMadeForStep, currentStep.content]);
 
-  // Reset suggestion flag when the step changes
   useEffect(() => {
     setSuggestionMadeForStep(null);
   }, [currentStepIndex]);
-
 
   const handlePrevStep = () => {
     setHasInteracted(true);
@@ -171,7 +174,7 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
   const handleRaiseHand = () => {
     setHasInteracted(true);
     stopSpeaking();
-    setIsAutoplay(false); // Pause autoplay when hand is raised
+    setIsAutoplay(false);
     setMessages(prev => [...prev, { sender: 'ai', text: "I see you've raised your hand! What's your question?" }]);
   };
 
@@ -195,7 +198,6 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
 
   const handleEndLesson = useCallback(() => {
     setHasInteracted(true);
-    // This function now calculates progress and shows the report dashboard.
     finishLesson();
   }, [finishLesson]);
   
@@ -203,6 +205,45 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
     setHasInteracted(true);
     setIsMuted(prev => !prev);
   }
+
+  const handleAiAddImage = async (prompt: string, options: any) => {
+    if (!smartWhiteboardRef.current) return;
+    try {
+        const imageUrl = await generateImage(prompt);
+        smartWhiteboardRef.current.aiAddImage(imageUrl, options || {});
+    } catch(error) {
+        console.error("Failed to add AI image to whiteboard:", error);
+        setMessages(prev => [...prev, { sender: 'ai', text: "I tried to create an image, but something went wrong. Let's try that again later." }]);
+    }
+  };
+
+  const handleAiToolCall = (toolCall: { name: string; args: any }) => {
+    if (!smartWhiteboardRef.current) return;
+    
+    switch (toolCall.name) {
+      case 'addText':
+        smartWhiteboardRef.current.aiAddText(toolCall.args.text, toolCall.args.options || {});
+        break;
+      case 'addShape':
+        smartWhiteboardRef.current.aiAddShape(toolCall.args.shapeType, toolCall.args.options || {});
+        break;
+      case 'addImage':
+        handleAiAddImage(toolCall.args.prompt, toolCall.args.options || {});
+        break;
+      case 'clearCanvas':
+        smartWhiteboardRef.current.aiClearCanvas();
+        break;
+      default:
+        console.warn(`Unknown AI tool called: ${toolCall.name}`);
+    }
+  };
+
+  const getWhiteboardState = () => {
+      if (smartWhiteboardRef.current) {
+          return smartWhiteboardRef.current.getCanvasState();
+      }
+      return null;
+  };
 
   if (lessonFinished && lessonResult) {
     return (
@@ -223,8 +264,23 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 flex flex-col space-y-6">
           <Whiteboard step={currentStep} onQuizAnswer={handleQuizAnswer} isAdapting={isAdapting} />
+           <ControlPanel
+                currentStepIndex={currentStepIndex}
+                totalSteps={currentLessonPlan.steps.length}
+                onNextStep={handleNextStep}
+                onPrevStep={handlePrevStep}
+                onEndSession={handleEndLesson}
+                onRegenerate={handleRegenerate}
+                isAdapting={isAdapting}
+                isAutoplay={isAutoplay}
+                onToggleAutoplay={() => { setHasInteracted(true); setIsAutoplay(prev => !prev); }}
+                isMuted={isMuted}
+                onToggleMute={handleToggleMute}
+                autoplayProgress={autoplayProgress}
+            />
+          <SmartWhiteboard ref={smartWhiteboardRef} />
         </div>
         <div className="space-y-6">
           <ChatPanel 
@@ -232,25 +288,12 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
             lessonContext={`${currentLessonPlan.topic} - ${currentStep.title}`}
             onRaiseHand={handleRaiseHand}
             onSuggestionAction={handleSuggestionAction}
+            onAiToolCall={handleAiToolCall}
+            getWhiteboardState={getWhiteboardState}
            />
           <StudentEngagementMonitor onEngagementChange={handleEngagementChange} />
         </div>
       </div>
-      <ControlPanel
-        currentStepIndex={currentStepIndex}
-        totalSteps={currentLessonPlan.steps.length}
-        onNextStep={handleNextStep}
-        onPrevStep={handlePrevStep}
-        onEndSession={handleEndLesson}
-        onRegenerate={handleRegenerate}
-        isAdapting={isAdapting}
-        // Autoplay and Mute props
-        isAutoplay={isAutoplay}
-        onToggleAutoplay={() => { setHasInteracted(true); setIsAutoplay(prev => !prev); }}
-        isMuted={isMuted}
-        onToggleMute={handleToggleMute}
-        autoplayProgress={autoplayProgress}
-      />
     </div>
   );
 };

@@ -9,6 +9,8 @@ interface ChatPanelProps {
   lessonContext: string;
   onRaiseHand: () => void;
   onSuggestionAction?: (action: 'regenerate') => void;
+  onAiToolCall: (toolCall: { name: string; args: any }) => void;
+  getWhiteboardState: () => { json: any; image: string } | null;
 }
 
 const formatChatMessage = (text: string) => {
@@ -28,7 +30,7 @@ const fileToBase64 = (file: File): Promise<string> =>
   });
 
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonContext, onRaiseHand, onSuggestionAction }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonContext, onRaiseHand, onSuggestionAction, onAiToolCall, getWhiteboardState }) => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -47,49 +49,31 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonCont
   useEffect(scrollToBottom, [messages]);
 
   useEffect(() => {
-    // Fix: Cast window to any to access non-standard SpeechRecognition APIs.
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       setIsSpeechRecognitionSupported(true);
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
+      recognition.onstart = () => setIsListening(true);
+      recognition.onend = () => setIsListening(false);
       recognition.onerror = (event: any) => {
         console.error('Speech recognition error', event.error);
         setIsListening(false);
       };
-
       recognition.onresult = (event: any) => {
         let finalTranscript = '';
         let interimTranscript = '';
-
         for (let i = 0; i < event.results.length; ++i) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript;
-          } else {
-            interimTranscript += transcript;
-          }
+          if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+          else interimTranscript += event.results[i][0].transcript;
         }
         setInput(finalTranscript + interimTranscript);
       };
-
       recognitionRef.current = recognition;
     }
-
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
 
@@ -97,48 +81,48 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonCont
     if (isListening) {
       recognitionRef.current?.stop();
     } else {
-      setInput(''); // Clear input before starting new recognition
+      setInput('');
       recognitionRef.current?.start();
     }
   };
 
   const clearImage = () => {
     setImageFile(null);
-    if(imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl);
-    }
+    if(imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleSend = async () => {
     if (input.trim() === '' && !imageFile) return;
-    if(isListening) {
-        recognitionRef.current?.stop();
-    }
+    if(isListening) recognitionRef.current?.stop();
 
     const newUserMessage: ChatMessage = { sender: 'user', text: input, imageUrl: imagePreviewUrl };
     setMessages(prev => [...prev, newUserMessage]);
     
-    let imageData: { base64: string; mimeType: string } | undefined = undefined;
+    let chatImageData: { base64: string; mimeType: string } | undefined = undefined;
     if (imageFile) {
         const base64String = await fileToBase64(imageFile);
-        imageData = {
-            base64: base64String.split(',')[1],
-            mimeType: imageFile.type
-        };
+        chatImageData = { base64: base64String.split(',')[1], mimeType: imageFile.type };
     }
     
+    const whiteboardState = getWhiteboardState();
+
     setInput('');
     clearImage();
     setIsTyping(true);
 
-    const aiResponseText = await getChatResponse(input, lessonContext, imageData);
-    const newAiMessage: ChatMessage = { sender: 'ai', text: aiResponseText };
+    const aiResponse = await getChatResponse(input, lessonContext, chatImageData, whiteboardState?.json, whiteboardState?.image);
     
-    setMessages(prev => [...prev, newAiMessage]);
+    if (aiResponse.text) {
+        const newAiMessage: ChatMessage = { sender: 'ai', text: aiResponse.text };
+        setMessages(prev => [...prev, newAiMessage]);
+    }
+
+    if (aiResponse.functionCalls) {
+        aiResponse.functionCalls.forEach(onAiToolCall);
+    }
+    
     setIsTyping(false);
   };
   
@@ -167,7 +151,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonCont
         {messages.length === 0 && (
             <div className="text-center text-sm text-gray-500 dark:text-gray-400 h-full flex flex-col justify-center">
                 <p>Have a question or want to share something?</p>
-                <p>Type, speak, or upload an image below!</p>
+                <p>The AI can now see and interact with the whiteboard!</p>
             </div>
         )}
         {messages.map((msg, index) => (
@@ -239,7 +223,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, setMessages, lessonCont
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && !isTyping && handleSend()}
-            placeholder={isListening ? "Listening..." : "Ask a question..."}
+            placeholder={isListening ? "Listening..." : "Ask about the whiteboard..."}
             className="w-full pr-12 pl-4 py-2 border border-gray-300 dark:border-gray-600 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200"
             disabled={isTyping}
           />

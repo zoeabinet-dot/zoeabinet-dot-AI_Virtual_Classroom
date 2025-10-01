@@ -70,6 +70,34 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
   const intervalRef = useRef<number | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
+  // This function is now defined early so it can be used in cleanup.
+  const stopCamera = useCallback(() => {
+    // More robustly stop the camera by checking both the ref and the video element's srcObject
+    const stopStream = (stream: MediaStream | null) => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+    };
+
+    stopStream(streamRef.current);
+    streamRef.current = null;
+
+    if (videoRef.current && videoRef.current.srcObject) {
+        stopStream(videoRef.current.srcObject as MediaStream);
+        videoRef.current.srcObject = null;
+    }
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    
+    const canvas = canvasRef.current;
+    if(canvas) {
+        const context = canvas.getContext('2d');
+        if (context) context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }, []);
+
+
   useEffect(() => {
     const loadModels = async () => {
         if (typeof faceapi === 'undefined') {
@@ -97,7 +125,12 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
         }
     };
     loadModels();
-  }, []);
+
+    // Ensure camera is stopped when component unmounts
+    return () => {
+        stopCamera();
+    };
+  }, [stopCamera]);
 
   const startCamera = async () => {
     setCameraError(null);
@@ -111,21 +144,6 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
       console.error("Error accessing camera:", err);
       setCameraError("Camera access was denied. Please enable it in your browser settings.");
       setIsCameraOn(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    
-    const canvas = canvasRef.current;
-    if(canvas) {
-        const context = canvas.getContext('2d');
-        if (context) context.clearRect(0, 0, canvas.width, canvas.height);
     }
   };
 
@@ -245,7 +263,7 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     }
-  }, [isCameraOn, monitorMode, runRealtimeDetection, runSimulation, drawHud]);
+  }, [isCameraOn, monitorMode, runRealtimeDetection, runSimulation, drawHud, stopCamera]);
 
   useEffect(() => {
       if (!isCameraOn) { setLevel(EngagementLevel.HIGH); onEngagementChange(EngagementLevel.HIGH); return; }
