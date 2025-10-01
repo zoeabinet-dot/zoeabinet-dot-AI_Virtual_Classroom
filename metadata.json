@@ -1,0 +1,8 @@
+{
+  "name": "AI Virtual Classroom",
+  "description": "An interactive virtual classroom where a Gemini-powered AI model acts as a teacher, generating lesson plans, delivering multimodal content, and adaptively responding to student interactions and engagement levels.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
