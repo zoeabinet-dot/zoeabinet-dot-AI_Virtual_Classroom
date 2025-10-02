@@ -17,43 +17,82 @@ const stepIcons: { [key in LessonStepType]: React.ReactElement } = {
 };
 
 const formatContent = (text: string) => {
-    const lines = text.split('\n');
-    let inList = false;
-    const processedLines = lines.map(line => {
-        if (line.trim() === '') return '<br />';
-        if (line.startsWith('### ')) return `<h3>${line.substring(4)}</h3>`;
-        
-        line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        line = line.replace(/\*(.*?)\*/g, '<em>$1</em>');
-        
-        if (line.match(/^(\s*(\*|-)\s+)/)) {
-            let listItem = `<li>${line.replace(/^(\s*(\*|-)\s+)/, '')}</li>`;
-            if (!inList) {
-                inList = true;
-                return `<ul>` + listItem;
-            }
-            return listItem;
-        } else {
-            if (inList) {
-                inList = false;
-                return `</ul>` + `<p>${line}</p>`;
-            }
-            return `<p>${line}</p>`;
+    // Defensively add newlines before markdown elements if they are missing.
+    // This makes the renderer resilient to malformed AI output.
+    const preprocessedText = text
+        .replace(/([^\n])(###\s)/g, '$1\n\n$2') // Add newlines before ### if not there
+        .replace(/([^\n])(\*\s)/g, '$1\n$2')   // Add newline before * if not there
+        .replace(/([^\n])(\d+\.\s)/g, '$1\n$2'); // Add newline before 1. if not there
+
+    const lines = preprocessedText.split('\n');
+    let inUnorderedList = false;
+    let inOrderedList = false;
+
+    const closeLists = () => {
+        let closingTags = '';
+        if (inUnorderedList) {
+            closingTags += '</ul>';
+            inUnorderedList = false;
         }
+        if (inOrderedList) {
+            closingTags += '</ol>';
+            inOrderedList = false;
+        }
+        return closingTags;
+    };
+
+    const processedLines = lines.map(line => {
+        if (line.trim() === '') return '';
+
+        let content = line
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>');
+        
+        if (content.startsWith('### ')) {
+            return closeLists() + `<h3 class="text-xl font-semibold mt-4 mb-2">${content.substring(4)}</h3>`;
+        }
+
+        // Handle Unordered List Items
+        if (content.match(/^(\s*(\*|-)\s+)/)) {
+            let listItem = `<li>${content.replace(/^(\s*(\*|-)\s+)/, '')}</li>`;
+            let openingTag = '';
+            if (inOrderedList) {
+                openingTag += '</ol>';
+                inOrderedList = false;
+            }
+            if (!inUnorderedList) {
+                inUnorderedList = true;
+                openingTag += '<ul class="list-disc pl-6 space-y-1">';
+            }
+            return openingTag + listItem;
+        }
+        
+        // Handle Ordered List Items
+        if (content.match(/^(\s*\d+\.\s+)/)) {
+            let listItem = `<li>${content.replace(/^(\s*\d+\.\s+)/, '')}</li>`;
+            let openingTag = '';
+            if (inUnorderedList) {
+                openingTag += '</ul>';
+                inUnorderedList = false;
+            }
+            if (!inOrderedList) {
+                inOrderedList = true;
+                openingTag += '<ol class="list-decimal pl-6 space-y-1">';
+            }
+            return openingTag + listItem;
+        }
+        
+        // Handle Paragraphs
+        return closeLists() + `<p>${content}</p>`;
     });
 
-    if (inList) {
-        processedLines.push('</ul>');
-    }
+    processedLines.push(closeLists());
 
-    const htmlContent = processedLines.join('')
-      .replace(/<p><br \/><\/p>/g, '<br />')
-      .replace(/<p><\/p>/g, '') 
-      .replace(/---/g, '<hr class="my-4"/>')
-      .replace(/lesson generally covers:/i, '');
-
+    const htmlContent = processedLines.filter(Boolean).join('');
+    
     return { __html: htmlContent };
 };
+
 
 const Whiteboard: React.FC<WhiteboardProps> = ({ step, onQuizAnswer, isAdapting }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);

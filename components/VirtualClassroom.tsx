@@ -1,5 +1,3 @@
-
-// FIX: Removed erroneous file header that was causing a syntax error.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { LessonPlan, LessonResult, ChatMessage } from '../types';
 import { LessonStepType, EngagementLevel } from '../types';
@@ -291,6 +289,8 @@ const VirtualClassroom: React.FC<VirtualClassroomProps> = ({ lessonPlan, onEndSe
             onAiToolCall={handleAiToolCall}
             getWhiteboardState={getWhiteboardState}
            />
+           {/* Spacer to align with the ControlPanel on the left */}
+           <div className="h-[98px] flex-shrink-0"></div>
           <StudentEngagementMonitor onEngagementChange={handleEngagementChange} />
         </div>
       </div>

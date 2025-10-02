@@ -290,8 +290,8 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 h-[524px] flex flex-col">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <div className="flex items-center space-x-2">
             {monitorMode === 'simulated' ? <Cpu className="h-6 w-6 text-yellow-500"/> : <BarChart3 className="h-6 w-6 text-indigo-500" />}
             <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Engagement Monitor</h3>
@@ -303,7 +303,7 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
         </button>
       </div>
 
-       <div className="w-full aspect-video bg-gray-900 rounded-lg flex flex-col items-center justify-center text-gray-400 mb-3 overflow-hidden relative">
+       <div className="w-full aspect-video bg-gray-900 rounded-lg flex flex-col items-center justify-center text-gray-400 mb-3 overflow-hidden relative flex-shrink-0">
             <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover transition-opacity duration-300 ${isCameraOn ? 'opacity-100' : 'opacity-0'}`} onLoadedMetadata={() => videoRef.current?.play()}/>
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
             <div className='absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-black/50 transition-opacity' style={{opacity: isCameraOn ? 0 : 1}}>
@@ -311,7 +311,7 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
             </div>
         </div>
       
-      <div className="space-y-3">
+      <div className="space-y-3 flex-grow flex flex-col">
         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
           <div className={`h-2.5 rounded-full transition-all duration-500 ${config.barColor}`} style={{ width: config.width }}></div>
         </div>
@@ -321,19 +321,21 @@ const StudentEngagementMonitor: React.FC<StudentEngagementMonitorProps> = ({ onE
            <span className="text-xs text-gray-500 dark:text-gray-400 italic ml-auto">{config.text}</span>
         </div>
 
-        <div className="h-[90px] bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 space-y-1 overflow-y-auto border dark:border-gray-600">
-            <h4 className="text-xs font-bold text-gray-600 dark:text-gray-400 pb-1 border-b dark:border-gray-600">Behavioral Event Log {monitorMode === 'simulated' ? '(Simulated)' : '(Live)'}</h4>
-            {eventLog.length > 0 ? (
-                eventLog.map(event => (
-                    <div key={event.timestamp} className="flex items-center space-x-2 text-xs text-gray-700 dark:text-gray-300 animate-fade-in">
-                        {eventIcons[event.icon]}
-                        <span>{event.description}</span>
-                        <span className="ml-auto text-gray-400 dark:text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                ))
-            ) : (
-                <p className="text-xs text-gray-500 dark:text-gray-400 text-center pt-4">Event log is empty. Turn on camera.</p>
-            )}
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 space-y-1 border dark:border-gray-600 flex-grow flex flex-col">
+            <h4 className="text-xs font-bold text-gray-600 dark:text-gray-400 pb-1 border-b dark:border-gray-600 flex-shrink-0">Behavioral Event Log {monitorMode === 'simulated' ? '(Simulated)' : '(Live)'}</h4>
+            <div className="flex-grow overflow-y-auto">
+                {eventLog.length > 0 ? (
+                    eventLog.map(event => (
+                        <div key={event.timestamp} className="flex items-center space-x-2 text-xs text-gray-700 dark:text-gray-300 animate-fade-in">
+                            {eventIcons[event.icon]}
+                            <span>{event.description}</span>
+                            <span className="ml-auto text-gray-400 dark:text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                    ))
+                ) : (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center pt-4">Event log is empty. Turn on camera.</p>
+                )}
+            </div>
         </div>
       </div>
     </div>

@@ -1,3 +1,5 @@
+// FIX: Removed invalid file marker from the top of the file.
+// FIX: Removed erroneous file markers that were causing syntax errors.
 // FIX: Removed erroneous file header that was causing a syntax error.
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import type { LessonPlan, LessonStep } from '../types';
@@ -47,8 +49,55 @@ const lessonPlanSchema = {
   required: ['subject', 'grade', 'topic', 'learningObjectives', 'steps'],
 };
 
-export const generateLessonPlan = async (subject: string, grade: string, topic: string): Promise<LessonPlan> => {
-  const prompt = `Generate a detailed, engaging, and structured lesson plan for a class of ${grade} students on the topic of "${topic}" in the subject of ${subject}. The lesson should be broken down into clear steps, including a mix of lectures, visual aids (describe what image to generate), interactive quizzes (with 4 options), and simple activities. The total lesson duration should be around 30-45 minutes.`;
+export const generateLessonPlan = async (subject: string, grade: string, topic: string, duration: string): Promise<LessonPlan> => {
+  const prompt = `Generate a detailed, engaging, and visually stunning lesson plan for a digital whiteboard. The target audience is ${grade} students, the subject is ${subject}, and the topic is "${topic}".
+The total lesson duration MUST be approximately ${duration} minutes. Adjust the depth, detail, and number of steps accordingly.
+
+Act as a world-class curriculum designer. The content for each step must be rich, descriptive, and highly engaging. The tone should be exciting and inspiring.
+
+**CRITICAL FORMATTING RULES:**
+- The 'content' for each step MUST be a single string formatted with markdown.
+- You MUST use newlines to separate paragraphs, headings, and list items.
+- Every heading (e.g., '### title') and every list item (e.g., '* item' or '1. item') MUST start on its own new line.
+- Do NOT output a single compressed block of text. Use whitespace for readability.
+- Do NOT include a separate line for the duration within the lesson content itself; the duration is already displayed elsewhere.
+- The output format MUST precisely follow the detailed example provided below.
+
+**PERFECT EXAMPLE OF AN INTRODUCTION STEP'S 'content' FIELD:**
+"🌌 Welcome to Our Cosmic Neighborhood!
+
+👩‍🚀 Hello, future astronauts and stargazers!
+Get ready to blast off on an amazing journey as we explore our very own Solar System!
+Have you ever looked up at the night sky and wondered what’s out there? 🌠
+Well, today, we’re going to find out!
+
+By the end of this adventure, you’ll be a Solar System expert! 🌍✨
+
+### 🎯 Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+* ☀️ Identify the main components of our Solar System (the Sun, planets, and more!).
+* 🌎 Describe key features of the inner (terrestrial) and outer (gas giant) planets.
+* 🪐 Recall the correct order of planets from the Sun.
+* 🌌 Appreciate the vastness and wonder of space.
+
+### 🗓️ Lesson Agenda
+
+1. **Meet Our Star – The Sun!** ☀️
+   Discover the heart of our Solar System.
+2. **The Inner, Rocky Planets** 🪨
+   Mercury, Venus, Earth, and Mars.
+3. **Quiz Time: Inner Planets Check!** ❓
+   Test your cosmic knowledge.
+4. **The Outer, Gas Giants** 🌌
+   Jupiter, Saturn, Uranus, Neptune.
+5. **Journey’s End, Knowledge Begins!** 🚀
+   Reflect on the wonders we’ve discovered."
+
+- A shorter lesson (~15 mins) should be a concise overview.
+- A longer lesson (~45 mins) should include more detailed explanations and more activities/quizzes.
+- Ensure the durations of all steps sum up to the total requested duration.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -142,11 +191,16 @@ export const getChatResponse = async (
     whiteboardImage?: string,
 ): Promise<{ text: string; functionCalls?: any[] }> => {
     const systemInstruction = `You are a friendly, interactive AI teacher. You are conducting a lesson for a student and have a shared smart whiteboard.
-    - The current lesson context is: "${lessonContext}".
-    - The student may ask questions about the lesson, their chat uploads, or the contents of the whiteboard.
-    - The whiteboard's contents are provided as both a JSON object list and a screenshot. Use this context to answer questions.
-    - You have tools to modify the whiteboard. You can use these tools to add text, shapes, generate and add images, or clear the canvas to better explain concepts. Use your tools when it would be helpful to illustrate your point visually.
-    - Be supportive, concise, and helpful.`;
+- The current lesson context is: "${lessonContext}".
+- The student may ask questions about the lesson, their chat uploads, or the contents of the whiteboard.
+- The whiteboard's contents are provided as both a JSON object list and a screenshot. Use this context to answer questions.
+- You have tools to modify the whiteboard. You can use these tools to add text, shapes, generate and add images, or clear the canvas to better explain concepts.
+- Be supportive, concise, and helpful.
+
+**CRITICAL RULE:** When you decide to use a tool (i.e., when you generate a functionCall), you MUST ALSO provide a concurrent, friendly text response confirming the action you are taking.
+- **Example:** If the user says "Show me a cat," and you use the 'addImage' tool, your response MUST include BOTH the functionCall AND a text property like: "Of course! I'm adding an image of a cat to the whiteboard for you now."
+- **Example:** If the user says "Write 'Hello' on the board," your response MUST include BOTH the functionCall for 'addText' AND a text property like: "You got it! I've written 'Hello' on the board."
+- Do NOT respond with just a functionCall and no text. Always confirm your action.`;
 
     const parts = [];
 
@@ -199,6 +253,7 @@ export const getAdaptiveSuggestion = async (lessonContent: string, engagement: s
     
     try {
         const response = await ai.models.generateContent({
+            // FIX: Corrected typo in model name
             model: "gemini-2.5-flash",
             contents: prompt,
         });

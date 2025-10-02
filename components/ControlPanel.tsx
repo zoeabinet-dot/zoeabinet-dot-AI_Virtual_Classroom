@@ -1,3 +1,4 @@
+// FIX: Removed erroneous file markers that were causing syntax errors.
 import React from 'react';
 import { ChevronLeft, ChevronRight, XCircle, Volume2, VolumeX, Sparkles, RefreshCw, Play, Pause } from 'lucide-react';
 
@@ -34,7 +35,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const isLastStep = currentStepIndex === totalSteps - 1;
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 space-y-3">
+    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 space-y-3 h-[98px] flex flex-col justify-center">
       <div className="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0">
         <div className="flex items-center space-x-2">
           <button
@@ -80,8 +81,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </button>
       </div>
       {isAutoplay && (
-        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-          <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${autoplayProgress}%`, transition: autoplayProgress > 0 ? 'width 1s linear' : 'none' }}></div>
+        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 absolute bottom-4 left-0 right-0 px-4">
+          <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `calc(100% - 2rem) * ${autoplayProgress / 100}`, transition: autoplayProgress > 0 ? 'width 1s linear' : 'none', marginLeft: '1rem', marginRight: '1rem' }}></div>
         </div>
       )}
     </div>

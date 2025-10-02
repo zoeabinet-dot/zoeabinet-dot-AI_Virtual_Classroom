@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { LessonPlan, LessonResult, UserStats } from '../types';
 import { generateLessonPlan } from '../services/geminiService';
-import { Loader2, Wand2, History, Trash2, BarChart, Flame, Star, TrendingUp } from 'lucide-react';
+import { Loader2, Wand2, History, Trash2, BarChart, Flame, Star, TrendingUp, Clock } from 'lucide-react';
 
 interface LessonPlannerProps {
   userStats: UserStats;
@@ -13,11 +13,17 @@ interface LessonPlannerProps {
 
 const subjects = ["Mathematics", "Science", "History", "English", "Geography"];
 const grades = ["1st Grade", "2nd Grade", "3rd Grade", "4th Grade", "5th Grade", "6th Grade", "7th Grade", "8th Grade"];
+const lessonLengths = [
+    { value: '15', label: 'Short (~15 mins)' },
+    { value: '30', label: 'Standard (~30 mins)' },
+    { value: '45', label: 'Extended (~45 mins)' }
+];
 
 const LessonPlanner: React.FC<LessonPlannerProps> = ({ userStats, onLessonPlanGenerated, lessonHistory, onViewReport, onClearHistory }) => {
   const [subject, setSubject] = useState(subjects[1]);
   const [grade, setGrade] = useState(grades[4]);
   const [topic, setTopic] = useState("The Solar System");
+  const [lessonLength, setLessonLength] = useState(lessonLengths[1].value);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +32,7 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ userStats, onLessonPlanGe
     setIsLoading(true);
     setError(null);
     try {
-      const plan = await generateLessonPlan(subject, grade, topic);
+      const plan = await generateLessonPlan(subject, grade, topic, lessonLength);
       onLessonPlanGenerated(plan);
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
@@ -76,23 +82,32 @@ const LessonPlanner: React.FC<LessonPlannerProps> = ({ userStats, onLessonPlanGe
         
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="subject" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject</label>
-            <select id="subject" value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm text-gray-900 dark:text-gray-200">
-              {subjects.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor="grade" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Grade Level</label>
-            <select id="grade" value={grade} onChange={(e) => setGrade(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm text-gray-900 dark:text-gray-200">
-              {grades.map(g => <option key={g}>{g}</option>)}
-            </select>
-          </div>
-
-          <div>
             <label htmlFor="topic" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Topic</label>
             <input type="text" id="topic" value={topic} onChange={(e) => setTopic(e.target.value)} className="mt-1 block w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900 dark:text-gray-200" placeholder="e.g., Photosynthesis, The American Revolution"/>
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <label htmlFor="subject" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject</label>
+              <select id="subject" value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm text-gray-900 dark:text-gray-200">
+                {subjects.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="grade" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Grade Level</label>
+              <select id="grade" value={grade} onChange={(e) => setGrade(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm text-gray-900 dark:text-gray-200">
+                {grades.map(g => <option key={g}>{g}</option>)}
+              </select>
+            </div>
+          </div>
+          
+           <div>
+            <label htmlFor="lessonLength" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Lesson Length</label>
+            <select id="lessonLength" value={lessonLength} onChange={(e) => setLessonLength(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm text-gray-900 dark:text-gray-200">
+              {lessonLengths.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+            </select>
+          </div>
+
 
           {error && <div className="text-red-500 bg-red-100 dark:bg-red-900/50 p-3 rounded-md text-sm">{error}</div>}
 

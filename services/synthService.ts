@@ -21,7 +21,11 @@ export const speak = (text: string, onEnd: () => void): void => {
     };
 
     utterance.onerror = (event) => {
-      console.error('SpeechSynthesisUtterance.onerror', event.error); // Log the specific error
+      // The 'interrupted' error is expected when the user navigates away or stops speech manually.
+      // We don't need to log it as a critical error.
+      if (event.error !== 'interrupted') {
+          console.error('SpeechSynthesisUtterance.onerror', event.error);
+      }
       if (currentUtterance === utterance) {
         currentUtterance = null;
         onEnd(); // Still call onEnd to unblock UI state
