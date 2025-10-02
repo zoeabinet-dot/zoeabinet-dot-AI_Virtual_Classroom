@@ -1,3 +1,4 @@
+// FIX: Removed erroneous file markers from the start and end of the file.
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { MousePointer2, Pencil, Eraser, Type, Trash2, Undo2, Redo2, ImagePlus, Video, Circle, RectangleHorizontal, Minus, Play, Pause, StopCircle } from 'lucide-react';
 
@@ -6,6 +7,9 @@ declare const fabric: any;
 const SmartWhiteboard = forwardRef((props, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fabricRef = useRef<any>(null);
+    const isUnmounting = useRef(false); // Guard flag
+    const resizeObserverRef = useRef<ResizeObserver | null>(null); // Ref for stable observer instance
+
     const [tool, setTool] = useState('select');
     const [color, setColor] = useState('#000000');
     const [brushWidth, setBrushWidth] = useState(5);
@@ -21,7 +25,7 @@ const SmartWhiteboard = forwardRef((props, ref) => {
 
     // --- State Saving Logic ---
     const saveState = useCallback(() => {
-        if (!fabricRef.current) return;
+        if (!fabricRef.current || isUnmounting.current) return;
         const canvasState = JSON.stringify(fabricRef.current.toDatalessJSON());
         
         setHistory(prevHistory => {
@@ -53,7 +57,7 @@ const SmartWhiteboard = forwardRef((props, ref) => {
     }, []);
 
     const manageRenderLoop = useCallback(() => {
-        if (!fabricRef.current) return;
+        if (!fabricRef.current || isUnmounting.current) return;
         const canvas = fabricRef.current;
         const videosOnCanvas = canvas.getObjects().filter((obj: any) => 
             obj.getElement && typeof obj.getElement === 'function' && obj.getElement().tagName === 'VIDEO'
@@ -63,7 +67,7 @@ const SmartWhiteboard = forwardRef((props, ref) => {
         if (isAnyVideoPlaying && !isRenderLoopRunning.current) {
             isRenderLoopRunning.current = true;
             const render = () => {
-                if (!fabricRef.current) { isRenderLoopRunning.current = false; return; };
+                if (!fabricRef.current || isUnmounting.current) { isRenderLoopRunning.current = false; return; };
                 canvas.renderAll();
                 renderLoopRef.current = fabric.util.requestAnimFrame(render);
             };
@@ -105,11 +109,17 @@ const SmartWhiteboard = forwardRef((props, ref) => {
         },
         aiAddImage: (imageUrl: string, options: any) => {
             const canvas = fabricRef.current; if (!canvas) return;
-            fabric.Image.fromURL(imageUrl, (img: any) => {
-                img.set({ left: options.left || 100, top: options.top || 100 });
-                img.scaleToWidth(canvas.width * 0.5);
-                canvas.add(img); canvas.renderAll(); saveStateRef.current();
-            }, { crossOrigin: 'anonymous' });
+            fabric.Image.fromURL(imageUrl, (fabricImage: any) => {
+                if (fabricImage) {
+                    fabricImage.set({ left: options.left || 100, top: options.top || 100 });
+                    fabricImage.scaleToWidth(canvas.width * 0.5);
+                    canvas.add(fabricImage);
+                    canvas.renderAll();
+                    saveStateRef.current();
+                } else {
+                    console.error("AI failed to load generated image from data URL.");
+                }
+            });
         },
         aiClearCanvas: () => {
             const canvas = fabricRef.current; if (!canvas) return;
@@ -143,9 +153,9 @@ const SmartWhiteboard = forwardRef((props, ref) => {
     // --- Core Initialization and Cleanup Effect ---
     useEffect(() => {
         let canvasInstance: any = null;
-        let resizeObserverInstance: ResizeObserver | null = null;
         let parentElement: HTMLElement | null = null;
         let drawingTimeout: number | null = null;
+        isUnmounting.current = false;
 
         const initializeFabric = () => {
             if (!canvasRef.current || fabricRef.current) return;
@@ -165,41 +175,63 @@ const SmartWhiteboard = forwardRef((props, ref) => {
             const handleObjectModified = () => saveStateRef.current();
             const handlePathCreated = () => {
                 if (drawingTimeout) clearTimeout(drawingTimeout);
-                drawingTimeout = window.setTimeout(() => saveStateRef.current(), 300);
+                drawingTimeout = window.setTimeout(() => {
+                    if (isUnmounting.current) return; // Guard check
+                    saveStateRef.current();
+                }, 300);
             };
             const handleSelection = (e: any) => setSelectedObject(e.selected ? e.selected[0] : null);
 
             canvas.on({ 'object:modified': handleObjectModified, 'path:created': handlePathCreated, 'selection:created': handleSelection, 'selection:updated': handleSelection, 'selection:cleared': () => setSelectedObject(null) });
 
-            resizeObserverInstance = new ResizeObserver(entries => {
-                if (!fabricRef.current) return;
+            resizeObserverRef.current = new ResizeObserver(entries => {
+                if (!fabricRef.current || isUnmounting.current) return;
                 for (let entry of entries) { fabricRef.current.setWidth(entry.contentRect.width); fabricRef.current.renderAll(); }
             });
-            resizeObserverInstance.observe(parentElement);
+            resizeObserverRef.current.observe(parentElement);
         };
         
         initializeFabric();
 
         return () => {
+            isUnmounting.current = true;
+
+            // 1. Disconnect the ResizeObserver first to stop layout-related callbacks.
+            const observer = resizeObserverRef.current;
+            if (observer) {
+                observer.disconnect();
+                resizeObserverRef.current = null;
+            }
+
+            // 2. Clear any pending timers that could interact with the canvas.
             if (drawingTimeout) clearTimeout(drawingTimeout);
             if (renderLoopRef.current) fabric.util.cancelAnimFrame(renderLoopRef.current);
-            
-            const observer = resizeObserverInstance;
-            if (observer) observer.disconnect();
-            
-            const canvas = canvasInstance;
-            if (canvas) {
+
+            // 3. Safely clean up the Fabric.js canvas instance using the closure-scoped variable.
+            const canvasToDispose = canvasInstance;
+            if (canvasToDispose) {
                 try {
-                    stopAllVideos();
-                    canvas.off();
-                    canvas.dispose();
+                    // Stop any playing media elements tied to the canvas.
+                    canvasToDispose.getObjects().forEach((obj: any) => {
+                        if (obj.getElement && typeof obj.getElement === 'function' && obj.getElement().tagName === 'VIDEO') {
+                            const videoEl = obj.getElement();
+                            videoEl.pause();
+                            videoEl.src = ''; // Release the media resource
+                        }
+                    });
+                    // Unbind all event listeners to prevent memory leaks.
+                    canvasToDispose.off();
+                    // Dispose of the canvas and all its resources.
+                    canvasToDispose.dispose();
                 } catch (e) {
-                    console.error("Error during Fabric.js canvas cleanup:", e);
+                    console.error("Error during robust Fabric.js canvas cleanup:", e);
                 }
             }
+            
+            // 4. Finally, nullify the main ref to signal that the canvas is gone.
             fabricRef.current = null;
         };
-    }, [stopAllVideos]); // This effect now runs only once.
+    }, []);
 
     const changeTool = (newTool: string) => {
         setTool(newTool);
@@ -280,16 +312,30 @@ const SmartWhiteboard = forwardRef((props, ref) => {
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fileType: 'image' | 'video') => {
         const file = e.target.files?.[0]; if (!file) return;
-        const url = URL.createObjectURL(file);
         const canvas = fabricRef.current; if (!canvas) return;
         const onAdd = (obj: any) => { obj.scaleToWidth(canvas.getWidth() * 0.8); canvas.centerObject(obj); canvas.setActiveObject(obj); canvas.renderAll(); saveStateRef.current(); changeTool('select'); };
-        if (fileType === 'image') fabric.Image.fromURL(url, onAdd, { crossOrigin: 'anonymous' });
-        else if (fileType === 'video') {
+        
+        if (fileType === 'image') {
+            const reader = new FileReader();
+            reader.onload = (f) => {
+                const dataUrl = f.target?.result as string;
+                fabric.Image.fromURL(dataUrl, (fabricImage: any) => {
+                    if (fabricImage) {
+                        onAdd(fabricImage);
+                    } else {
+                        console.error("Fabric.js failed to create image from data URL.");
+                    }
+                });
+            };
+            reader.readAsDataURL(file);
+        } else if (fileType === 'video') {
+            const url = URL.createObjectURL(file);
             const videoEl = document.createElement('video');
             videoEl.muted = true; videoEl.crossOrigin = 'anonymous'; videoEl.controls = false;
             videoEl.onloadeddata = () => onAdd(new fabric.Image(videoEl, { objectCaching: false }));
             videoEl.src = url;
         }
+
         if (e.target) e.target.value = '';
     };
 
@@ -315,7 +361,7 @@ const SmartWhiteboard = forwardRef((props, ref) => {
             <div className="flex-shrink-0 space-y-3">
                 <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Shared Smart Whiteboard</h3>
                 <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg bg-gray-100 dark:bg-gray-900 border dark:border-gray-700">
-                    {toolbarButtons.map(btn => ( <button key={btn.name} onClick={btn.action} className={`p-2 rounded-md transition-colors ${tool === btn.name ? 'bg-indigo-500 text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'}`} title={btn.name}>{btn.icon}</button> ))}
+                    {toolbarButtons.map(btn => ( <button key={btn.name} onClick={btn.action} className={`p-2 rounded-md transition-colors ${tool === btn.name ? 'bg-indigo-500 text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'}`} title={btn.name}>{btn.icon}</button>))}
                     <div className="h-8 w-px bg-gray-300 dark:bg-gray-600"></div>
                     <input type="color" value={color} onChange={handleColorChange} className="w-10 h-10 p-0 border-none rounded-md bg-white dark:bg-gray-700 cursor-pointer" title="Select Color" />
                     <div className="flex items-center space-x-2 bg-white dark:bg-gray-700 px-2 py-1 rounded-md"> <Pencil size={16} /> <input type="range" min="1" max="50" value={brushWidth} onChange={handleBrushWidthChange} className="w-24" title="Brush Size"/> </div>
